@@ -11,9 +11,6 @@ import {
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
-// LiveKit's native SDK is not available in browser/Expo Go previews.
-// Real streaming must be enabled in a custom development/production build.
-const LIVEKIT_NATIVE_READY = false;
 
 const captureFilters = requireOptionalNativeModule('JnoteCaptureFilters');
 
@@ -523,6 +520,7 @@ function ShortVideos({ back, recordedClip, broadcasts }) {
               style={{ width: '100%', height: 360, backgroundColor: '#20243A' }} />
           ) : <ShortVideoPlayer key={post.id} video={post} />}
           <LiveAvatar
+            userId={post.user_id}
             name={broadcasts.find(creator => creator.hostId === post.user_id)?.name ||
               (post.user_id === session?.user?.id ? 'You' : 'Creator')}
             live={broadcasts.some(creator => creator.hostId === post.user_id)}
@@ -588,25 +586,16 @@ async function liveRequest(session, body, signal) {
   return response.json();
 }
 
-function LiveAvatar({ name, live, small = false }) {
+function LiveAvatar({ name, live, small = false, userId, revision }) {
+  const photo = userId ? VIDEO_PROJECT + '/storage/v1/object/public/jnote-profile-photos/' +
+    encodeURIComponent(userId) + '/avatar' + (revision ? '?v=' + revision : '') : '';
+  const [failedPhoto, setFailedPhoto] = useState('');
   return (
     <View accessibilityLabel={live ? name + ', live now' : name}
       accessible style={[styles.avatar, small && styles.liveAvatarSmall, live && styles.liveRing]}>
-      <Text style={[styles.avatarText, small && styles.liveAvatarSmallText]}>
-        {(name.trim()[0] || 'J').toUpperCase()}
-      </Text>
+      {photo && failedPhoto !== photo ? <Image onError={() => setFailedPhoto(photo)} source={{ uri: photo }} style={{ width: '100%', height: '100%', borderRadius: 55 }} /> :
+        <Text style={[styles.avatarText, small && styles.liveAvatarSmallText]}>{(name.trim()[0] || 'J').toUpperCase()}</Text>}
     </View>
-  );
-}
-
-function BroadcastRoom({ broadcast, onEnd }) {
-  return (
-    <ScrollView contentContainerStyle={styles.content}>
-      <Header title="Broadcast Setup" back={onEnd} />
-      <Text style={styles.error}>Real livestreaming is not available in this preview.</Text>
-      <Text style={styles.muted}>Jnote LIVE needs a custom iOS/Android build with the LiveKit native SDK installed. No broadcast has started.</Text>
-      <Button title="Back" action={onEnd} />
-    </ScrollView>
   );
 }
 
@@ -633,7 +622,7 @@ function LiveSignIn({ back, onSignIn }) {
   };
   return (
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-      <Header title="Sign In for Live" back={back} />
+      <Header title="Sign In to Jnote LIVE" back={back} />
       <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="Email"
         placeholderTextColor="#aaa" autoCapitalize="none" keyboardType="email-address" />
       <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder="Password"
@@ -1501,14 +1490,53 @@ export default function App() {
   const [bio, setBio] = useState('Welcome to my LIVE!');
   const [recordedClip, setRecordedClip] = useState(null);
   const [liveSession, setLiveSession] = useState(null);
+  const [photoRevision, setPhotoRevision] = useState(0);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photoPending = useRef(false);
+
+  const chooseProfilePhoto = async () => {
+    if (!liveSession) {
+      setLiveDestination('Profile');
+      setPage('Live Sign In');
+      return;
+    }
+    if (photoPending.current) return;
+    photoPending.current = true;
+    setPhotoBusy(true);
+    try {
+      const picker = requireOptionalNativeModule('ExponentImagePicker');
+      if (!picker?.launchImageLibraryAsync || Platform.OS === 'web') {
+        throw new Error('Open Jnote LIVE on your phone to choose a photo.');
+      }
+      const result = await picker.launchImageLibraryAsync({
+        mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.75,
+      });
+      const asset = result.assets?.[0];
+      if (result.canceled || !asset?.uri) return;
+      const extension = asset.uri.split('?')[0].split('.').pop()?.toLowerCase();
+      const formats = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+      const mime = asset.mimeType || formats[extension];
+      if (!Object.values(formats).includes(mime)) throw new Error('Choose a JPEG, PNG or WebP photo.');
+      if (asset.fileSize > 5242880) throw new Error('Choose a photo under 5 MB.');
+      const form = new FormData();
+      form.append('cacheControl', '0');
+      form.append('file', { uri: asset.uri, name: 'avatar.' + mime.split('/')[1], type: mime });
+      await videoRequest('/storage/v1/object/jnote-profile-photos/' + liveSession.user.id + '/avatar', {
+        method: 'POST', headers: { 'x-upsert': 'true' }, body: form,
+      }, liveSession.access_token);
+      setPhotoRevision(Date.now());
+    } catch (error) {
+      Alert.alert('Profile Photo', error.message || 'Could not save your photo.');
+    } finally {
+      photoPending.current = false;
+      setPhotoBusy(false);
+    }
+  };
+
   const [liveDestination, setLiveDestination] = useState('Live Now');
   const [broadcasts, setBroadcasts] = useState([]);
-  const [broadcast, setBroadcast] = useState(null);
   const [liveError, setLiveError] = useState('');
-  const [joiningLive, setJoiningLive] = useState(false);
-  const navigationRef = useRef(page);
-  navigationRef.current = page;
-  const joiningRef = useRef(false);
+  const joiningLive = false;
 
   useEffect(() => {
     if (!liveSession || !['Home', 'Live Now', 'Profile', 'Solo Live', 'Videos'].includes(page)) return;
@@ -1533,17 +1561,9 @@ export default function App() {
       controller.abort();
       clearTimeout(timeout);
     };
-  }, [page, liveSession, broadcast]);
+  }, [page, liveSession]);
 
-  const openBroadcast = async creator => {
-    if (!LIVEKIT_NATIVE_READY) {
-      Alert.alert(
-        'Real Live requires an app build',
-        'This browser/Expo Go preview cannot run LiveKit native video. Your wallet and other screens remain available. Build Jnote LIVE with the LiveKit native dependencies to enable real streaming.'
-      );
-      return;
-    }
-  };
+  const openBroadcast = () => Alert.alert('Native Build Required', 'Use the native Jnote LIVE build for broadcasting.');
 
   const openShortVideos = (clip = null) => {
     setRecordedClip(clip);
@@ -1628,14 +1648,6 @@ export default function App() {
     return winner === index ? '🏆 WINNER!' : '😢 LOSER';
   };
 
-  if (broadcast) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        <BroadcastRoom broadcast={broadcast} onEnd={() => setBroadcast(null)} />
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>
@@ -1659,7 +1671,7 @@ export default function App() {
                   accessibilityLabel={creator.name + ', live now. Open Live Now'}
                   onPress={() => setPage('Live Now')}
                   style={styles.liveCreator}>
-                  <LiveAvatar name={creator.name} live small />
+                  <LiveAvatar userId={creator.hostId} name={creator.name} live small />
                   <Text numberOfLines={1} style={styles.white}>{creator.name}</Text>
                 </TouchableOpacity>
               ))}
@@ -1686,7 +1698,7 @@ export default function App() {
           {!liveError && broadcasts.length === 0 && <Text style={styles.muted}>No active broadcasts found.</Text>}
           {broadcasts.map(creator => (
             <View key={creator.hostId} style={styles.panel}>
-              <LiveAvatar name={creator.name} live small />
+              <LiveAvatar userId={creator.hostId} name={creator.name} live small />
               <Text style={styles.white}>{creator.name}</Text>
               <Text style={styles.white}>🔴 LIVE</Text>
               <Button title="Watch Live" disabled={joiningLive || creator.hostId === liveSession?.user?.id}
@@ -1710,31 +1722,21 @@ export default function App() {
           <Header title="Solo Live" back={home} />
           <Button title={joiningLive ? 'Connecting…' : 'Go Live'}
             disabled={joiningLive} action={() => openBroadcast()} />
-          <Text style={styles.live}>
-            {isLivePreview ? 'SOLO LOCAL PREVIEW ACTIVE' : 'SOLO CAMERA PREVIEW'}
-          </Text>
-          <Button
-            title={isLivePreview ? 'End Local Preview' : 'Start Local Preview'}
-            action={toggleLivePreview}
-            danger={isLivePreview}
-          />
           <Button title="🎁 Send Gift" action={openGifts} />
-          <Text style={styles.muted}>
-            Comments and gifts here are local previews. Other phones cannot see them until real-time broadcasting, chat and gift delivery are connected.
-          </Text>
           <PhoneCamera
             onPostClip={openShortVideos}
             allowPhotos
+            showFaceGiftPreview
             muted={soloMuted}
             onMutedChange={setSoloMuted}
             username={username}
-            liveComments={isLivePreview && (
+            liveComments={
               <LiveComments
                 title="Solo Live Comments"
                 comments={liveComments}
                 onSend={sendLiveComment}
               />
-            )}
+            }
           />
           <Button title="Back to Home" action={home} />
         </ScrollView>
@@ -1991,7 +1993,8 @@ export default function App() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled">
           <Header title="My Profile" back={home} />
-          <LiveAvatar name={username} live={broadcasts.some(creator => creator.hostId === liveSession?.user?.id)} />
+          <LiveAvatar name={username} userId={liveSession?.user?.id} revision={photoRevision} live={broadcasts.some(creator => creator.hostId === liveSession?.user?.id)} />
+          <Button title={photoBusy ? 'Saving Photo…' : liveSession ? 'Change Profile Photo' : 'Sign In to Add a Profile Photo'} disabled={photoBusy} action={chooseProfilePhoto} />
           <GiftSenderProgress coinsSpent={giftCoinsSpent} />
           <Text style={styles.muted}>Username</Text>
           <TextInput
@@ -2037,7 +2040,7 @@ export default function App() {
           <Header title="My Wallet" back={home} />
           <GiftSenderProgress coinsSpent={giftCoinsSpent} />
           <Text style={styles.large}>{giftPreviewCoins.toLocaleString()} Preview Coins</Text>
-          <Text style={styles.muted}>Preview coins are free and cannot be withdrawn. Real coin purchases will be enabled after secure payments are connected.</Text>
+          <Text style={styles.muted}>See gift prices in coins and estimated USD. Preview Coins are free. Real coin purchases are currently unavailable.</Text>
           <Button title="Buy Gift" action={openGifts} />
           <Text style={styles.large}>Gift Earnings</Text>
           <Text style={styles.white}>70% recipient · 30% Jnote LIVE</Text>
@@ -2047,14 +2050,14 @@ export default function App() {
           <Text style={styles.muted}>
             Minimum withdrawal is ${MINIMUM_WITHDRAWAL_USD.toFixed(2)} USD ({MINIMUM_WITHDRAWAL_POINTS.toLocaleString('en-US')} verified earnings points).
           </Text>
-          <Text style={styles.muted}>Withdrawal minimum: $10 USD. Bank/card payouts will be enabled after secure payout setup.</Text>
+          <Text style={styles.muted}>Cash payouts are currently unavailable.</Text>
           <Button
             title="Withdraw Money"
             action={() => Alert.alert(
               'Withdraw Money',
               verifiedEarningsPoints < MINIMUM_WITHDRAWAL_POINTS
-                ? `Minimum withdrawal is $${MINIMUM_WITHDRAWAL_USD.toFixed(2)} USD. Your verified balance is $${(verifiedEarningsPoints / EARNINGS_POINTS_PER_DOLLAR).toFixed(2)} USD. Preview coins do not count.`
-                : 'You meet the $10 minimum, but withdrawals cannot be processed until secure payout services and identity verification are connected.'
+                ? `You need at least $${MINIMUM_WITHDRAWAL_USD.toFixed(2)} USD in verified gift earnings to withdraw.`
+                : 'Cash payouts are currently unavailable.'
             )}
           />
 
