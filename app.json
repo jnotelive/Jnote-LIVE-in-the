@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "Jnote LIVE",
+    "slug": "bass__note",
+    "version": "1.0.0",
+    "android": {
+      "package": "com.jnotelive.app"
+    }
+  }
+}
