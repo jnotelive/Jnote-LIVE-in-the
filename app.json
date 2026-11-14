@@ -1,13 +1,19 @@
 {
   "expo": {
     "name": "Jnote LIVE",
-    "slug": "bass__note",
+    "slug": "bassnote",
+    "owner": "basnote",
     "version": "1.0.0",
     "ios": {
       "bundleIdentifier": "com.jnotelive.app"
     },
     "android": {
       "package": "com.jnotelive.app"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "f6747957-e1bc-4ce2-8140-adc26ee3c5eb"
+      }
     }
   }
 }
