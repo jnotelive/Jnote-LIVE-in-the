@@ -1,0 +1,28 @@
+
+name: Jnote LIVE Expo Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install EAS CLI
+        run: npm install --global eas-cli
+
+      - name: Check Expo project files
+        run: |
+          ls -la
+          test -f app.json
+          test -f eas.json
+          test -f package.json
+          echo "Jnote LIVE project files found"
