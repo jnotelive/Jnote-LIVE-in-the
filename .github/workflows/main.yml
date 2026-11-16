@@ -25,4 +25,4 @@ jobs:
       - name: Build iPhone app
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas build --platform ios --profile production --non-interactive --no-wait
+        run: eas build --platform android --profile production --non-interactive
