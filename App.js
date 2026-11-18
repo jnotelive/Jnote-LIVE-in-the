@@ -572,7 +572,12 @@ function ShortVideos({ back, recordedClip, broadcasts }) {
             style={{ width: '100%', height: 220 }} />}
           <TextInput style={styles.input} placeholder="Caption (optional)" placeholderTextColor="#aaa"
             value={caption} onChangeText={setCaption} maxLength={150} />
-          <Button title={busy ? 'Uploading…' : 'Post to Jnote LIVE'} disabled={busy || !session} action={postMedia} />
+          <Text style={styles.muted}>
+            Only post media you created or have permission to share, including any music in a video.
+            By posting, you confirm you have those rights and give Jnote LIVE permission to store
+            and display this post publicly in the app.
+          </Text>
+          <Button title={busy ? 'Uploading…' : 'Agree & Post'} disabled={busy || !session} action={postMedia} />
         </>
       )}
     </ScrollView>
