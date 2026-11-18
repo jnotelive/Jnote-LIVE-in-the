@@ -9,6 +9,8 @@ import {
   useMicrophonePermissions,
 } from 'expo-camera';
 import { VideoView, useVideoPlayer } from 'expo-video';
+import { File } from 'expo-file-system';
+import { fetch as expoFetch } from 'expo/fetch';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 
@@ -295,7 +297,8 @@ const VIDEO_KEY = 'sb_publishable__lMPN4ILsPb9f07IgmBvIQ_NCstISdk';
 const VIDEO_BUCKET = 'jnote-short-videos';
 
 async function videoRequest(path, options = {}, token) {
-  const response = await fetch(VIDEO_PROJECT + path, {
+  const request = options.body instanceof File ? expoFetch : fetch;
+  const response = await request(VIDEO_PROJECT + path, {
     ...options,
     headers: {
       apikey: VIDEO_KEY,
@@ -437,10 +440,10 @@ function ShortVideos({ back, recordedClip, broadcasts }) {
     const path = uploadPath || session.user.id + '/' + Date.now() + '-' +
       Math.random().toString(36).slice(2) + extension;
     if (!uploadPath) {
-      const form = new FormData();
-      form.append('file', { uri: clip, name: 'jnote' + extension, type: mime });
       await videoRequest('/storage/v1/object/' + VIDEO_BUCKET + '/' + path, {
-        method: 'POST', body: form,
+        method: 'POST',
+        headers: { 'Content-Type': mime },
+        body: new File(clip),
       }, session.access_token);
       setUploadPath(path);
     }
