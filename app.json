@@ -5,7 +5,8 @@
     "owner": "basnote",
     "version": "1.0.0",
     "ios": {
-      "bundleIdentifier": "com.jnotelive.app"
+      "bundleIdentifier": "com.jnotelive.app",
+      "buildNumber": "2"
     },
     "android": {
       "package": "com.jnotelive.app"
